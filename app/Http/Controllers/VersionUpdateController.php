@@ -6,9 +6,7 @@ use App\Traits\General;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Redirect;
 use Exception;
 use File;
 use ZipArchive;
@@ -27,7 +25,6 @@ class VersionUpdateController extends Controller
     public function versionUpdate(Request $request)
     {
         $data['title'] = __('Version Update');
-
         return view('zainiklab.installer.version-update', $data);
     }
 
@@ -37,54 +34,29 @@ class VersionUpdateController extends Controller
             'email' => 'bail|required|email'
         ], [
             'email.required' => 'Customer email field is required',
-            'email.email' => 'Customer email field is must a valid email'
+            'email.email' => 'Customer email field must be a valid email'
         ]);
 
-        $response = Http::acceptJson()->post('https://support.zainikthemes.com/api/745fca97c52e41daa70a99407edf44dd/active', [
-            'app' => config('app.app_code'),
-            'is_localhost' => env('IS_LOCAL', false),
-            'type' => 1,
-            'email' => $request->email,
-            'version' => config('app.build_version'),
-            'url' => $request->fullUrl(),
-            'app_url' => env('APP_URL'),
+        // Removed the HTTP Post Request
+        Artisan::call('migrate', [
+            '--force' => true
         ]);
 
-        if ($response->successful()) {
-            $data = $response->object();
-            if ($data->status === 'success') {
-                Artisan::call('migrate', [
-                    '--force' => true
-                ]);
-
-                $data = json_decode($data->data->data);
-                Log::info($data);
-                foreach ($data as $d) {
-                    if (!Artisan::call($d)) {
-                        break;
-                    }
-                }
-
-                $installedLogFile = storage_path('installed');
-                if (file_exists($installedLogFile)) {
-                    $data = json_decode(file_get_contents($installedLogFile));
-                    if (!is_null($data) && isset($data->d)) {
-                        $data->u = date('ymdhis');
-                    } else {
-                        $data = [
-                            'd' => base64_encode(get_domain_name(request()->fullUrl())),
-                            'i' => date('ymdhis'),
-                            'u' => date('ymdhis'),
-                        ];
-                    }
-
-                    file_put_contents($installedLogFile, json_encode($data));
-                }
+        $installedLogFile = storage_path('installed');
+        if (file_exists($installedLogFile)) {
+            $data = json_decode(file_get_contents($installedLogFile));
+            if (!is_null($data) && isset($data->d)) {
+                $data->u = date('ymdhis');
             } else {
-                return Redirect::back()->withErrors(['email' => $data->message]);
+                $data = [
+                    'd' => base64_encode(get_domain_name(request()->fullUrl())),
+                    'i' => date('ymdhis'),
+                    'p' => '',  // Skipping purchase code
+                    'u' => date('ymdhis'),
+                ];
             }
-        } else {
-            return Redirect::back()->withErrors(['email' => 'Something went wrong with your request.']);
+
+            file_put_contents($installedLogFile, json_encode($data));
         }
 
         return redirect()->route('main.index');
@@ -94,25 +66,12 @@ class VersionUpdateController extends Controller
     {
         if (!auth()->user()->can('manage_version_update')) {
             abort('403');
-        }  // end permission checking
+        }
 
         $data['title'] = __('Version Update');
         $data['subNavVersionUpdateActiveClass'] = 'mm-active';
 
-        $apiResponse = Http::acceptJson()->post('https://support.zainikthemes.com/api/745fca97c52e41daa70a99407edf44dd/ad', [
-            'app' => config('app.app_code'),
-            'is_localhost' => env('IS_LOCAL', false),
-        ]);
-
-        if ($apiResponse->successful()) {
-            $responseData = $apiResponse->object();
-            $data['latestVersion'] = $responseData->data->cv;
-            $data['latestBuildVersion'] = $responseData->data->bv;
-            $data['addons'] = $responseData->data->addons;
-        } else {
-            $this->showToastrMessage('error', __('Something went wrong.'));
-            return back();
-        }
+        // Removed the HTTP Post Request
 
         $path = storage_path('app/source-code.zip');
 
@@ -207,94 +166,78 @@ class VersionUpdateController extends Controller
                     $this->logger->log('Get current version', 'START');
                     $currentVersion = getCustomerCurrentBuildVersion();
                     $this->logger->log('Get current version', 'END');
-                    $this->logger->log('Checking if updatable version from api', 'START');
-                    $apiResponse = Http::acceptJson()->post('https://support.zainikthemes.com/api/745fca97c52e41daa70a99407edf44dd/glv', [
-                        'app' => config('app.app_code'),
-                        'is_localhost' => env('IS_LOCAL', false),
-                    ]);
-                    $this->logger->log('Checking if updatable version from api', 'END');
 
-                    if ($apiResponse->successful()) {
-                        $this->logger->log('Response', 'Success');
-                        $data = $apiResponse->object();
-                        $this->logger->log('Response Data', json_encode($data));
-                        $latestVersion = $data->data->bv;
-                        if ($data->status === 'success') {
-                            $this->logger->log('Response status', 'Success');
-                            $this->logger->log('Checking if updatable code', 'START');
-                            if ($latestVersion == $codeVersion && $codeVersion > $currentVersion) {
-                                $this->logger->log('Checking if updatable code', 'True');
-                                $this->logger->log('Copy file', 'START');
+                    if ($codeVersion > $currentVersion) {
+                        $this->logger->log('Copy file', 'START');
 
-                                $allMoveFilePath = (array) ($updateNote->code_path);
-                                foreach ($allMoveFilePath as $filePath => $type) {
-                                    $this->logger->log('Copy file', 'Start ' . $demoPath . DIRECTORY_SEPARATOR . $codeRootPath . DIRECTORY_SEPARATOR . $filePath . ' to ' . base_path($filePath));
-                                    if ($type == 'file') {
-                                        File::copy($demoPath . DIRECTORY_SEPARATOR . $codeRootPath . DIRECTORY_SEPARATOR . $filePath, base_path($filePath));
-                                    } else {
-                                        File::copyDirectory($demoPath . DIRECTORY_SEPARATOR . $codeRootPath . DIRECTORY_SEPARATOR . $filePath, base_path($filePath));
-                                    }
-                                    $this->logger->log('Copy file', 'END ' . $demoPath . DIRECTORY_SEPARATOR . $codeRootPath . DIRECTORY_SEPARATOR . $filePath . ' to ' . base_path($filePath));
-                                }
-                                $response['success'] = true;
-                                $response['message'] = 'Successfully done';
-                                $this->logger->log('Copy file', 'Done');
+                        $allMoveFilePath = (array) ($updateNote->code_path);
+                        foreach ($allMoveFilePath as $filePath => $type) {
+                            $this->logger->log('Copy file', 'Start ' . $demoPath . DIRECTORY_SEPARATOR . $codeRootPath . DIRECTORY_SEPARATOR . $filePath . ' to ' . base_path($filePath));
+                            if ($type == 'file') {
+                                File::copy($demoPath . DIRECTORY_SEPARATOR . $codeRootPath . DIRECTORY_SEPARATOR . $filePath, base_path($filePath));
                             } else {
-                                $response['message'] = 'Your code is not up to date';
-                                $this->logger->log('Version', 'Not matched');
+                                File::copyDirectory($demoPath . DIRECTORY_SEPARATOR . $codeRootPath . DIRECTORY_SEPARATOR . $filePath, base_path($filePath));
                             }
-                        } else {
-                            $response['message'] = $data->message;
-                            $this->logger->log('Response Status', 'Failed');
+                            $this->logger->log('Copy file', 'END');
                         }
+
+                        $this->logger->log('Copy file', 'END');
+                        if (property_exists($updateNote, 'delete')) {
+                            $this->logger->log('Delete files', 'Start');
+                            $allDeleteFilePath = (array) ($updateNote->delete);
+                            foreach ($allDeleteFilePath as $filePath => $type) {
+                                if ($type == 'file') {
+                                    File::delete(base_path($filePath));
+                                } else {
+                                    File::deleteDirectory(base_path($filePath));
+                                }
+                            }
+                            $this->logger->log('Delete files', 'END');
+                        }
+
+                        Artisan::call('migrate', [
+                            '--force' => true
+                        ]);
+
+                        foreach ($updateNote->commands as $command) {
+                            if (!Artisan::call($command)) {
+                                break;
+                            }
+                        }
+
+                        $installedLogFile = storage_path('installed');
+                        if (file_exists($installedLogFile)) {
+                            $data = json_decode(file_get_contents($installedLogFile));
+                            if (!is_null($data) && isset($data->d)) {
+                                $data->u = date('ymdhis');
+                            } else {
+                                $data = [
+                                    'd' => base64_encode(get_domain_name(request()->fullUrl())),
+                                    'i' => date('ymdhis'),
+                                    'p' => '',  // Skipping purchase code
+                                    'u' => date('ymdhis'),
+                                ];
+                            }
+
+                            file_put_contents($installedLogFile, json_encode($data));
+                        }
+                        $response['success'] = true;
+                        $response['message'] = 'Your application updated successfully.';
                     } else {
-                        $data = $apiResponse->object();
-                        $response['message'] = $data['message'];
-                        $this->logger->log('Response', 'Failed');
+                        $response['message'] = 'You are using an invalid file!';
                     }
-
-                    $this->logger->log('Demo extracted path', 'Deleting');
-                    File::deleteDirectory($demoPath);
-
-                    $zipPath = storage_path('app/source-code.zip');
-
-                    if (file_exists($zipPath)) {
-                        File::delete($zipPath);
-                    }
-
-                    $this->logger->log('Demo extracted path', 'Deleted');
                 } catch (\Exception $e) {
-                    Log::info($e->getMessage());
                     $response['message'] = $e->getMessage();
-                    $this->logger->log('Exception', $e->getMessage());
                 }
+
                 $zip->close();
             } else {
-                $this->logger->log('Zip', 'Open failed');
+                $this->logger->log('Zip', 'Not open successfully');
             }
-        }
-
-        $this->logger->log('', '===============Update END==============');
-        return $response;
-    }
-
-    public function versionUpdateExecute()
-    {
-        $response = $this->executeUpdate();
-        if ($response['success'] == true) {
-            return back();
         } else {
-            $this->showToastrMessage('error', json_encode($response['message']));
+            $this->logger->log('File Not Found', 'Failed');
         }
-        return back();
-    }
 
-    public function versionFileUpdateDelete()
-    {
-        $path = storage_path('app/source-code.zip');
-
-        if (file_exists($path)) {
-            File::delete($path);
-        }
+        return response()->json($response);
     }
 }
