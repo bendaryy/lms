@@ -34,10 +34,8 @@ class VersionUpdateController extends Controller
     public function processUpdate(Request $request)
     {
         $request->validate([
-            'purchase_code' => 'required',
             'email' => 'bail|required|email'
         ], [
-            'purchase_code.required' => 'Purchase code field is required',
             'email.required' => 'Customer email field is required',
             'email.email' => 'Customer email field is must a valid email'
         ]);
@@ -47,7 +45,6 @@ class VersionUpdateController extends Controller
             'is_localhost' => env('IS_LOCAL', false),
             'type' => 1,
             'email' => $request->email,
-            'purchase_code' => $request->purchase_code,
             'version' => config('app.build_version'),
             'url' => $request->fullUrl(),
             'app_url' => env('APP_URL'),
@@ -77,7 +74,6 @@ class VersionUpdateController extends Controller
                         $data = [
                             'd' => base64_encode(get_domain_name(request()->fullUrl())),
                             'i' => date('ymdhis'),
-                            'p' => base64_encode($request->purchase_code),
                             'u' => date('ymdhis'),
                         ];
                     }
@@ -85,10 +81,10 @@ class VersionUpdateController extends Controller
                     file_put_contents($installedLogFile, json_encode($data));
                 }
             } else {
-                return Redirect::back()->withErrors(['purchase_code' => $data->message]);
+                return Redirect::back()->withErrors(['email' => $data->message]);
             }
         } else {
-            return Redirect::back()->withErrors(['purchase_code' => 'Something went wrong with your purchase key.']);
+            return Redirect::back()->withErrors(['email' => 'Something went wrong with your request.']);
         }
 
         return redirect()->route('main.index');
@@ -288,7 +284,6 @@ class VersionUpdateController extends Controller
         if ($response['success'] == true) {
             return back();
         } else {
-            // $this->logger->log('sfsdfsdfdsfsdf', $response['message']);
             $this->showToastrMessage('error', json_encode($response['message']));
         }
         return back();
